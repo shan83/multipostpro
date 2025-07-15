@@ -93,7 +93,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         .eq('id', supabaseUser.id)
         .single();
 
-      if (profileError && profileError.code !== 'PGRST116') {
+      // If profile doesn't exist, create it
+      if (profileError && profileError.code === 'PGRST116') {
+        const { error: createProfileError } = await supabase
+          .from('profiles')
+          .insert([
+            {
+              id: supabaseUser.id,
+              name: supabaseUser.user_metadata?.name || '',
+              avatar_url: supabaseUser.user_metadata?.avatar_url,
+            }
+          ]);
+
+        if (createProfileError) {
+          console.error('Error creating profile:', createProfileError);
+        }
+      } else if (profileError) {
         throw profileError;
       }
 
@@ -107,14 +122,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         console.error('Error fetching social accounts:', socialError);
       }
 
-      // Fetch platform configs
-      const { data: platformConfigs, error: configError } = await supabase
-        .from('platform_configs')
-        .select('*')
-        .eq('user_id', supabaseUser.id);
+      // Fetch platform configs (if table exists)
+      let platformConfigs = [];
+      try {
+        const { data: configs, error: configError } = await supabase
+          .from('platform_configs')
+          .select('*')
+          .eq('user_id', supabaseUser.id);
 
-      if (configError) {
-        console.error('Error fetching platform configs:', configError);
+        if (configError) {
+          console.error('Error fetching platform configs:', configError);
+        } else {
+          platformConfigs = configs || [];
+        }
+      } catch (error) {
+        console.log('Platform configs table might not exist yet');
       }
 
       // Create connected platforms map
@@ -167,7 +189,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const register = async (name: string, email: string, password: string) => {
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -179,6 +201,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       
       if (error) {
         return { error: error.message };
+      }
+
+      // If signup is successful and user is confirmed, create profile
+      if (data.user) {
+        try {
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .insert([
+              {
+                id: data.user.id,
+                name: name,
+                avatar_url: data.user.user_metadata?.avatar_url,
+              }
+            ]);
+
+          if (profileError) {
+            console.error('Error creating profile:', profileError);
+            // Don't return error here as the user account was created successfully
+            // The profile will be created by the database trigger anyway
+          }
+        } catch (profileError) {
+          console.error('Error creating profile:', profileError);
+        }
       }
       
       return {};

@@ -1,7 +1,8 @@
 import { useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { Eye, EyeOff, UserPlus } from 'lucide-react';
+import { Eye, EyeOff, UserPlus, Bug } from 'lucide-react';
+import { testAuthSetup } from '../../utils/testAuth';
 
 const Register = () => {
   const [name, setName] = useState('');
@@ -21,6 +22,10 @@ const Register = () => {
       return setError('Passwords do not match');
     }
     
+    if (password.length < 6) {
+      return setError('Password must be at least 6 characters long');
+    }
+    
     try {
       const result = await register(name, email, password);
       if (result.error) {
@@ -29,7 +34,17 @@ const Register = () => {
         navigate('/dashboard', { replace: true });
       }
     } catch (err) {
-      setError('Failed to create an account.');
+      console.error('Registration error:', err);
+      setError('Failed to create an account. Please check your connection and try again.');
+    }
+  };
+
+  const handleTestSetup = async () => {
+    const result = await testAuthSetup();
+    if (result) {
+      alert('✅ Authentication setup is working correctly!');
+    } else {
+      alert('❌ Authentication setup has issues. Check the console for details.');
     }
   };
 
@@ -60,6 +75,18 @@ const Register = () => {
               sign in to your existing account
             </Link>
           </p>
+          {import.meta.env.DEV && (
+            <div className="mt-4 text-center">
+              <button
+                type="button"
+                onClick={handleTestSetup}
+                className="inline-flex items-center px-3 py-1 text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+              >
+                <Bug className="h-3 w-3 mr-1" />
+                Test Setup
+              </button>
+            </div>
+          )}
         </div>
         
         {error && (
