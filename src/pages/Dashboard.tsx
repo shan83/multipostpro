@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { PenSquare, BarChart2, Calendar, Activity, Zap, Share2 } from 'lucide-react';
+import { PenSquare, BarChart2, Calendar, Activity, Zap, Share2, Plus, Check, X, ExternalLink } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 const Dashboard = () => {
-  const { user } = useAuth();
+  const { user, connectPlatform, disconnectPlatform } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
 
   // Mock data for dashboard
@@ -28,6 +28,68 @@ const Dashboard = () => {
     { name: 'YouTube', followers: 1205, engagement: 4520, growth: '+12.3%' },
   ];
 
+  const availablePlatforms = [
+    { 
+      key: 'youtube', 
+      name: 'YouTube', 
+      description: 'Upload videos and reach millions of viewers',
+      color: 'bg-red-600',
+      textColor: 'text-red-600',
+      bgLight: 'bg-red-50',
+      bgDark: 'bg-red-900/20',
+      icon: '📺'
+    },
+    { 
+      key: 'facebook', 
+      name: 'Facebook', 
+      description: 'Share posts, images, and videos with your audience',
+      color: 'bg-blue-600',
+      textColor: 'text-blue-600',
+      bgLight: 'bg-blue-50',
+      bgDark: 'bg-blue-900/20',
+      icon: '📘'
+    },
+    { 
+      key: 'instagram', 
+      name: 'Instagram', 
+      description: 'Post photos, stories, and reels',
+      color: 'bg-gradient-to-r from-purple-500 to-pink-500',
+      textColor: 'text-pink-600',
+      bgLight: 'bg-pink-50',
+      bgDark: 'bg-pink-900/20',
+      icon: '📷'
+    },
+    { 
+      key: 'twitter', 
+      name: 'Twitter', 
+      description: 'Share thoughts and engage in conversations',
+      color: 'bg-blue-400',
+      textColor: 'text-blue-400',
+      bgLight: 'bg-blue-50',
+      bgDark: 'bg-blue-900/20',
+      icon: '🐦'
+    },
+    { 
+      key: 'tiktok', 
+      name: 'TikTok', 
+      description: 'Create short-form videos and go viral',
+      color: 'bg-black',
+      textColor: 'text-gray-900',
+      bgLight: 'bg-gray-50',
+      bgDark: 'bg-gray-900/20',
+      icon: '🎵'
+    },
+    { 
+      key: 'linkedin', 
+      name: 'LinkedIn', 
+      description: 'Share professional content and network',
+      color: 'bg-blue-700',
+      textColor: 'text-blue-700',
+      bgLight: 'bg-blue-50',
+      bgDark: 'bg-blue-900/20',
+      icon: '💼'
+    }
+  ];
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'published':
@@ -74,6 +136,28 @@ const Dashboard = () => {
     }
   };
 
+  const handleConnectPlatform = async (platformKey: string) => {
+    setIsLoading(true);
+    try {
+      await connectPlatform(platformKey);
+    } catch (error) {
+      console.error('Failed to connect platform:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDisconnectPlatform = async (platformKey: string) => {
+    setIsLoading(true);
+    try {
+      await disconnectPlatform(platformKey);
+    } catch (error) {
+      console.error('Failed to disconnect platform:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
@@ -116,6 +200,123 @@ const Dashboard = () => {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Platform Connections */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+          <div>
+            <h2 className="text-lg font-medium text-gray-900 dark:text-white">Connected Platforms</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Connect your social media accounts to start publishing content
+            </p>
+          </div>
+          <Link 
+            to="/settings" 
+            className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center"
+          >
+            Manage all <ExternalLink className="ml-1 h-4 w-4" />
+          </Link>
+        </div>
+        <div className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {availablePlatforms.map((platform) => {
+              const isConnected = user?.socialAccounts?.some(account => account.platform === platform.key);
+              const connectedAccount = user?.socialAccounts?.find(account => account.platform === platform.key);
+              
+              return (
+                <div 
+                  key={platform.key} 
+                  className={`relative border-2 rounded-lg p-4 transition-all hover:shadow-md ${
+                    isConnected 
+                      ? `border-green-200 dark:border-green-800 ${platform.bgLight} dark:${platform.bgDark}` 
+                      : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600'
+                  }`}
+                >
+                  {isConnected && (
+                    <div className="absolute top-2 right-2">
+                      <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                        <Check className="w-4 h-4 text-white" />
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div className="flex items-start space-x-3">
+                    <div className="text-2xl">{platform.icon}</div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+                        {platform.name}
+                      </h3>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        {platform.description}
+                      </p>
+                      
+                      {isConnected && connectedAccount && (
+                        <div className="mt-2 space-y-1">
+                          {connectedAccount.username && (
+                            <p className="text-xs text-gray-600 dark:text-gray-300">
+                              @{connectedAccount.username}
+                            </p>
+                          )}
+                          {connectedAccount.followerCount && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {connectedAccount.followerCount.toLocaleString()} followers
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      
+                      <div className="mt-3">
+                        {isConnected ? (
+                          <div className="flex space-x-2">
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                              Connected
+                            </span>
+                            <button
+                              onClick={() => handleDisconnectPlatform(platform.key)}
+                              disabled={isLoading}
+                              className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+                            >
+                              <X className="w-3 h-3 mr-1" />
+                              Disconnect
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => handleConnectPlatform(platform.key)}
+                            disabled={isLoading}
+                            className={`inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium text-white transition-colors disabled:opacity-50 ${platform.color} hover:opacity-90`}
+                          >
+                            <Plus className="w-3 h-3 mr-1" />
+                            Connect
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          
+          {user?.socialAccounts?.length === 0 && (
+            <div className="text-center py-8">
+              <div className="mx-auto h-12 w-12 text-gray-400 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center mb-4">
+                <Share2 className="h-6 w-6" />
+              </div>
+              <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-2">No platforms connected</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                Connect your social media accounts to start publishing content across multiple platforms.
+              </p>
+              <Link
+                to="/settings"
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+              >
+                Go to Settings
+              </Link>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
