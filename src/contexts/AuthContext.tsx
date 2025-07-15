@@ -1,5 +1,7 @@
 import { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { generateAuthUrl, generateState, isPlatformConfigured } from '../lib/oauth';
+import { OAuthService } from '../services/oauthService';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 type SocialAccount = {
@@ -53,6 +55,7 @@ type AuthContextType = {
   connectPlatform: (platform: string) => Promise<void>;
   disconnectPlatform: (platform: string) => Promise<void>;
   refreshUserData: () => Promise<void>;
+  refreshPlatformToken: (platform: string) => Promise<boolean>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -85,36 +88,74 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const fetchUserProfile = async (supabaseUser: SupabaseUser) => {
+    console.log('🔍 fetchUserProfile called for:', supabaseUser.email);
     try {
       // Fetch user profile
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', supabaseUser.id)
-        .single();
-
-      if (profileError && profileError.code !== 'PGRST116') {
-        throw profileError;
+      let profile = null;
+      let profileError = null;
+      
+      try {
+        const result = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', supabaseUser.id)
+          .single();
+        profile = result.data;
+        profileError = result.error;
+      } catch (dbError) {
+        console.error('Database query failed:', dbError);
+        profileError = dbError;
       }
 
-      // Fetch social accounts
-      const { data: socialAccounts, error: socialError } = await supabase
-        .from('social_accounts')
-        .select('*')
-        .eq('user_id', supabaseUser.id);
-
-      if (socialError) {
-        console.error('Error fetching social accounts:', socialError);
+      // If profile doesn't exist, try to create it
+      if (profileError && (profileError as any).code === 'PGRST116') {
+        try {
+          await supabase
+            .from('profiles')
+            .insert([
+              {
+                id: supabaseUser.id,
+                name: supabaseUser.user_metadata?.name || '',
+                avatar_url: supabaseUser.user_metadata?.avatar_url,
+              }
+            ]);
+        } catch (createError) {
+          console.error('Failed to create profile:', createError);
+        }
       }
 
-      // Fetch platform configs
-      const { data: platformConfigs, error: configError } = await supabase
-        .from('platform_configs')
-        .select('*')
-        .eq('user_id', supabaseUser.id);
+      // Fetch social accounts (with error handling)
+      let socialAccounts = [];
+      try {
+        const { data, error: socialError } = await supabase
+          .from('social_accounts')
+          .select('*')
+          .eq('user_id', supabaseUser.id);
+        
+        if (socialError) {
+          console.error('Error fetching social accounts:', socialError);
+        } else {
+          socialAccounts = data || [];
+        }
+      } catch (error) {
+        console.error('Social accounts query failed:', error);
+      }
 
-      if (configError) {
-        console.error('Error fetching platform configs:', configError);
+      // Fetch platform configs (with error handling)
+      let platformConfigs = [];
+      try {
+        const { data, error: configError } = await supabase
+          .from('platform_configs')
+          .select('*')
+          .eq('user_id', supabaseUser.id);
+
+        if (configError) {
+          console.error('Error fetching platform configs:', configError);
+        } else {
+          platformConfigs = data || [];
+        }
+      } catch (error) {
+        console.error('Platform configs query failed:', error);
       }
 
       // Create connected platforms map
@@ -123,7 +164,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         connectedPlatforms[account.platform] = true;
       });
 
-      setUser({
+      // Always create user object, even if some queries failed
+      const userObj = {
         id: supabaseUser.id,
         name: profile?.name || supabaseUser.user_metadata?.name || '',
         email: supabaseUser.email || '',
@@ -131,9 +173,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         socialAccounts: socialAccounts || [],
         platformConfigs: platformConfigs || [],
         connectedPlatforms,
-      });
+      };
+      
+      console.log('✅ Setting user state:', { email: userObj.email, name: userObj.name });
+      setUser(userObj);
     } catch (error) {
       console.error('Error fetching user profile:', error);
+      
+      // Create a basic user object even if everything fails
+      setUser({
+        id: supabaseUser.id,
+        name: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || '',
+        email: supabaseUser.email || '',
+        avatar: supabaseUser.user_metadata?.avatar_url,
+        socialAccounts: [],
+        platformConfigs: [],
+        connectedPlatforms: {},
+      });
     } finally {
       setLoading(false);
     }
@@ -150,13 +206,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const login = async (email: string, password: string) => {
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
       
       if (error) {
         return { error: error.message };
+      }
+      
+      // If login is successful, immediately fetch user profile to ensure state is updated
+      if (data.user) {
+        await fetchUserProfile(data.user);
       }
       
       return {};
@@ -192,76 +253,154 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const connectPlatform = async (platform: string) => {
-    if (!user) return;
+    console.log('🔗 Attempting to connect platform:', platform);
+    
+    if (!user) {
+      console.error('🔗 No user found');
+      alert('Please log in first to connect platforms.');
+      return;
+    }
     
     try {
       // Check if platform is already connected
       const existingAccount = user.socialAccounts?.find(account => account.platform === platform);
       if (existingAccount) {
+        console.log('🔗 Platform already connected:', platform);
         alert('Platform already connected!');
         return;
       }
 
-      // Simulate OAuth flow - in production, redirect to OAuth URL
-      const shouldConnect = window.confirm(
-        `This will redirect you to ${platform} to authorize the connection. Continue?`
-      );
-      
-      if (!shouldConnect) return;
+      // Check if OAuth is configured for this platform
+      if (!isPlatformConfigured(platform)) {
+        console.warn(`🔗 OAuth not configured for ${platform}, using demo mode...`);
+        
+        // Fallback to demo mode if OAuth not configured
+        const shouldConnect = window.confirm(
+          `OAuth not configured for ${platform}. Create a demo connection instead?`
+        );
+        
+        if (!shouldConnect) {
+          console.log('🔗 User cancelled demo connection');
+          return;
+        }
 
-      // For demo, we'll create a mock social account
-      const mockAccountData = {
-        user_id: user.id,
-        platform: platform,
-        platform_user_id: `mock_${platform}_${Date.now()}`,
-        username: `user_${platform}`,
-        display_name: `Demo ${platform.charAt(0).toUpperCase() + platform.slice(1)} Account`,
-        follower_count: Math.floor(Math.random() * 10000) + 1000,
-        is_business_account: platform === 'instagram' ? Math.random() > 0.5 : false,
-        access_token: 'mock_access_token',
-        refresh_token: 'mock_refresh_token',
-        token_expires_at: new Date(Date.now() + 3600000).toISOString(), // 1 hour from now
-        scopes: ['basic_info', 'publish_content'],
-      };
-
-      const { error } = await supabase
-        .from('social_accounts')
-        .insert([mockAccountData]);
-
-      if (error) {
-        console.error('Error connecting platform:', error);
-        alert('Failed to connect platform. Please try again.');
+        // Create demo connection (existing logic)
+        const mockAccount = {
+          id: `demo_${platform}_${Date.now()}`,
+          user_id: user.id,
+          platform: platform,
+          platform_user_id: `demo_${platform}_${Date.now()}`,
+          username: `demo_${platform}`,
+          display_name: `Demo ${platform.charAt(0).toUpperCase() + platform.slice(1)} Account`,
+          follower_count: Math.floor(Math.random() * 10000) + 1000,
+          is_business_account: platform === 'instagram' ? Math.random() > 0.5 : false,
+          access_token: 'demo_access_token',
+          refresh_token: 'demo_refresh_token',
+          token_expires_at: new Date(Date.now() + 3600000).toISOString(),
+          scopes: ['basic_info', 'publish_content'],
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        
+        // Update user state directly (demo mode)
+        const updatedUser = {
+          ...user,
+          socialAccounts: [...(user.socialAccounts || []), mockAccount],
+          connectedPlatforms: {
+            ...user.connectedPlatforms,
+            [platform]: true,
+          },
+        };
+        
+        setUser(updatedUser);
+        alert(`Demo connection created for ${platform}! Configure OAuth for real connections.`);
         return;
       }
 
-      // Create default platform config
-      const defaultConfig = {
-        user_id: user.id,
-        platform: platform,
-        default_post_format: 'optimized',
-        optimal_posting_times: ['09:00', '12:00', '17:00'],
-        hashtag_strategy: 'platform_optimized',
-        image_quality: 'high',
-        auto_publish: false,
-        settings: {
-          auto_hashtags: true,
-          cross_post: true,
-          analytics_tracking: true,
-        },
-      };
-
-      await supabase
-        .from('platform_configs')
-        .insert([defaultConfig]);
-
-      // Refresh user data
-      await refreshUserData();
+      // Generate OAuth authorization URL
+      console.log('🔗 Generating OAuth authorization URL...');
+      const state = generateState(platform, user.id);
+      const authUrl = generateAuthUrl(platform, state);
       
-      alert(`Successfully connected to ${platform}!`);
+      console.log('🔗 Redirecting to OAuth authorization...', authUrl);
+      
+      // Store the state in sessionStorage for validation
+      sessionStorage.setItem(`oauth_state_${platform}`, state);
+      
+      // Redirect to OAuth authorization page
+      window.location.href = authUrl;
       
     } catch (error) {
-      console.error('Error connecting platform:', error);
-      alert('Failed to connect platform. Please try again.');
+      console.error('🔗 Connection error:', error);
+      
+      // Show user-friendly error message
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      alert(`Failed to connect to ${platform}: ${errorMessage}`);
+    }
+  };
+
+  const refreshPlatformToken = async (platform: string): Promise<boolean> => {
+    if (!user) return false;
+    
+    try {
+      // Find the social account for this platform
+      const socialAccount = user.socialAccounts?.find(account => account.platform === platform);
+      if (!socialAccount) {
+        console.error(`No social account found for platform: ${platform}`);
+        return false;
+      }
+
+      // Check if refresh token exists
+      if (!socialAccount.refresh_token) {
+        console.error(`No refresh token available for platform: ${platform}`);
+        return false;
+      }
+
+      // Check if token needs refreshing
+      if (!socialAccount.token_expires_at || !OAuthService.isTokenExpired(socialAccount.token_expires_at)) {
+        console.log(`Token for ${platform} is still valid`);
+        return true;
+      }
+
+      console.log(`Refreshing token for platform: ${platform}`);
+      
+      // Refresh the token using OAuth service
+      const tokenResponse = await OAuthService.refreshToken(platform, socialAccount.refresh_token);
+      
+      if (!tokenResponse.access_token) {
+        throw new Error('Failed to refresh token - no access token received');
+      }
+
+      // Calculate new expiration date
+      const newExpiresAt = tokenResponse.expires_in 
+        ? OAuthService.calculateExpirationDate(tokenResponse.expires_in)
+        : new Date(Date.now() + 3600000).toISOString(); // Default 1 hour
+
+      // Update the token in database
+      const { error } = await supabase
+        .from('social_accounts')
+        .update({
+          access_token: tokenResponse.access_token,
+          refresh_token: tokenResponse.refresh_token || socialAccount.refresh_token,
+          token_expires_at: newExpiresAt,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', socialAccount.id);
+
+      if (error) {
+        console.error('Failed to update token in database:', error);
+        return false;
+      }
+
+      // Refresh user data to get updated tokens
+      await refreshUserData();
+      
+      console.log(`Successfully refreshed token for ${platform}`);
+      return true;
+      
+    } catch (error) {
+      console.error(`Error refreshing token for ${platform}:`, error);
+      return false;
     }
   };
 
@@ -275,7 +414,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       
       if (!shouldDisconnect) return;
 
-      // Delete social account
+      // Find the social account to get the access token
+      const socialAccount = user.socialAccounts?.find(account => account.platform === platform);
+      
+      // Revoke the access token if available
+      if (socialAccount?.access_token) {
+        try {
+          await OAuthService.revokeToken(platform, socialAccount.access_token);
+          console.log(`Successfully revoked token for ${platform}`);
+        } catch (revokeError) {
+          console.warn(`Failed to revoke token for ${platform}:`, revokeError);
+          // Continue with disconnection even if token revocation fails
+        }
+      }
+
+      // Delete social account from database
       const { error: accountError } = await supabase
         .from('social_accounts')
         .delete()
@@ -316,6 +469,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     connectPlatform,
     disconnectPlatform,
     refreshUserData,
+    refreshPlatformToken,
   };
 
   return (

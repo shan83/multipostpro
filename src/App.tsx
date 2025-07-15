@@ -10,6 +10,7 @@ import MediaLibrary from './pages/MediaLibrary';
 import Settings from './pages/Settings';
 import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
+import OAuthCallback from './pages/auth/OAuthCallback';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 
 function App() {
@@ -20,6 +21,7 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/auth/callback/:platform" element={<OAuthCallback />} />
             <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />

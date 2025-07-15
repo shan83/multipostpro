@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PenSquare, BarChart2, Calendar, Activity, Zap, Share2, Plus, Check, X, ExternalLink } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { isPlatformConfigured } from '../lib/oauth';
 
 const Dashboard = () => {
   const { user, connectPlatform, disconnectPlatform } = useAuth();
@@ -282,14 +283,21 @@ const Dashboard = () => {
                             </button>
                           </div>
                         ) : (
-                          <button
-                            onClick={() => handleConnectPlatform(platform.key)}
-                            disabled={isLoading}
-                            className={`inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium text-white transition-colors disabled:opacity-50 ${platform.color} hover:opacity-90`}
-                          >
-                            <Plus className="w-3 h-3 mr-1" />
-                            Connect
-                          </button>
+                          <div className="flex flex-col space-y-1">
+                            <button
+                              onClick={() => handleConnectPlatform(platform.key)}
+                              disabled={isLoading}
+                              className={`inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium text-white transition-colors disabled:opacity-50 ${platform.color} hover:opacity-90`}
+                            >
+                              <Plus className="w-3 h-3 mr-1" />
+                              Connect
+                            </button>
+                            {!isPlatformConfigured(platform.key) && (
+                              <div className="text-xs text-orange-600 dark:text-orange-400" title="OAuth not configured - will use demo mode">
+                                ⚠️ Demo mode
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
