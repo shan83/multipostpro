@@ -112,28 +112,12 @@ CREATE TABLE IF NOT EXISTS media (
   updated_at timestamptz DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS platform_configs (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid REFERENCES profiles ON DELETE CASCADE NOT NULL,
-  platform text NOT NULL,
-  default_post_format text DEFAULT 'optimized',
-  optimal_posting_times text[] DEFAULT ARRAY['09:00', '12:00', '17:00'],
-  hashtag_strategy text DEFAULT 'platform_optimized',
-  image_quality text DEFAULT 'high',
-  auto_publish boolean DEFAULT false,
-  settings jsonb DEFAULT '{}',
-  created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now(),
-  UNIQUE(user_id, platform)
-);
-
 -- Enable Row Level Security
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE social_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE post_platforms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE media ENABLE ROW LEVEL SECURITY;
-ALTER TABLE platform_configs ENABLE ROW LEVEL SECURITY;
 
 -- Create policies
 CREATE POLICY "Users can view own profile"
@@ -187,16 +171,6 @@ CREATE POLICY "Users can view own media"
 
 CREATE POLICY "Users can manage own media"
   ON media FOR ALL
-  TO authenticated
-  USING (user_id = auth.uid());
-
-CREATE POLICY "Users can view own platform configs"
-  ON platform_configs FOR SELECT
-  TO authenticated
-  USING (user_id = auth.uid());
-
-CREATE POLICY "Users can manage own platform configs"
-  ON platform_configs FOR ALL
   TO authenticated
   USING (user_id = auth.uid());
 
