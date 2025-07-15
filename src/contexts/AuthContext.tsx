@@ -1,10 +1,37 @@
-import { createContext, useState, useContext, ReactNode } from 'react';
+import { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
-import type { Database } from '../types/database';
 
-type SocialAccount = Database['public']['Tables']['social_accounts']['Row'];
-type PlatformConfig = Database['public']['Tables']['platform_configs']['Row'];
+type SocialAccount = {
+  id: string;
+  user_id: string;
+  platform: string;
+  platform_user_id?: string;
+  username?: string;
+  display_name?: string;
+  follower_count?: number;
+  is_business_account?: boolean;
+  access_token?: string;
+  refresh_token?: string;
+  token_expires_at?: string;
+  scopes?: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+type PlatformConfig = {
+  id: string;
+  user_id: string;
+  platform: string;
+  default_post_format: string;
+  optimal_posting_times: string[];
+  hashtag_strategy: string;
+  image_quality: string;
+  auto_publish: boolean;
+  settings: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+};
 
 type User = {
   id: string;
@@ -13,6 +40,7 @@ type User = {
   avatar?: string;
   socialAccounts?: SocialAccount[];
   platformConfigs?: PlatformConfig[];
+  connectedPlatforms?: Record<string, boolean>;
 };
 
 type AuthContextType = {
@@ -31,7 +59,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     // Check active sessions and sets the user
@@ -65,7 +93,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         .eq('id', supabaseUser.id)
         .single();
 
-      if (profileError) throw profileError;
+      if (profileError && profileError.code !== 'PGRST116') {
+        throw profileError;
+      }
 
       // Fetch social accounts
       const { data: socialAccounts, error: socialError } = await supabase
@@ -73,7 +103,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         .select('*')
         .eq('user_id', supabaseUser.id);
 
-      if (socialError) throw socialError;
+      if (socialError) {
+        console.error('Error fetching social accounts:', socialError);
+      }
 
       // Fetch platform configs
       const { data: platformConfigs, error: configError } = await supabase
@@ -81,7 +113,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         .select('*')
         .eq('user_id', supabaseUser.id);
 
-      if (configError) throw configError;
+      if (configError) {
+        console.error('Error fetching platform configs:', configError);
+      }
+
+      // Create connected platforms map
+      const connectedPlatforms: Record<string, boolean> = {};
+      socialAccounts?.forEach(account => {
+        connectedPlatforms[account.platform] = true;
+      });
 
       setUser({
         id: supabaseUser.id,
@@ -90,6 +130,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         avatar: profile?.avatar_url || supabaseUser.user_metadata?.avatar_url,
         socialAccounts: socialAccounts || [],
         platformConfigs: platformConfigs || [],
+        connectedPlatforms,
       });
     } catch (error) {
       console.error('Error fetching user profile:', error);
@@ -150,36 +191,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await supabase.auth.signOut();
   };
 
-  // Platform OAuth URLs - In production, these would be your actual OAuth endpoints
-  const getOAuthUrl = (platform: string) => {
-    const baseUrl = window.location.origin;
-    const redirectUri = `${baseUrl}/auth/callback/${platform}`;
-    
-    switch (platform) {
-      case 'youtube':
-        return `https://accounts.google.com/oauth/authorize?client_id=YOUR_GOOGLE_CLIENT_ID&redirect_uri=${redirectUri}&scope=https://www.googleapis.com/auth/youtube&response_type=code&access_type=offline`;
-      case 'facebook':
-        return `https://www.facebook.com/v18.0/dialog/oauth?client_id=YOUR_FACEBOOK_APP_ID&redirect_uri=${redirectUri}&scope=pages_manage_posts,pages_read_engagement&response_type=code`;
-      case 'instagram':
-        return `https://api.instagram.com/oauth/authorize?client_id=YOUR_INSTAGRAM_CLIENT_ID&redirect_uri=${redirectUri}&scope=user_profile,user_media&response_type=code`;
-      case 'twitter':
-        return `https://twitter.com/i/oauth2/authorize?response_type=code&client_id=YOUR_TWITTER_CLIENT_ID&redirect_uri=${redirectUri}&scope=tweet.read%20tweet.write%20users.read&state=state`;
-      case 'tiktok':
-        return `https://www.tiktok.com/auth/authorize/?client_key=YOUR_TIKTOK_CLIENT_KEY&response_type=code&scope=user.info.basic,video.list&redirect_uri=${redirectUri}`;
-      case 'linkedin':
-        return `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=YOUR_LINKEDIN_CLIENT_ID&redirect_uri=${redirectUri}&scope=r_liteprofile%20r_emailaddress%20w_member_social`;
-      default:
-        return '';
-    }
-  };
-
   const connectPlatform = async (platform: string) => {
     if (!user) return;
     
     try {
-      // For demo purposes, we'll simulate a successful connection
-      // In production, this would initiate the OAuth flow
-      
       // Check if platform is already connected
       const existingAccount = user.socialAccounts?.find(account => account.platform === platform);
       if (existingAccount) {
@@ -291,40 +306,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // In production, you would handle the OAuth callback here
-  const handleOAuthCallback = async (platform: string, code: string) => {
-    try {
-      // Exchange code for access token
-      // This would be done on your backend for security
-      const response = await fetch('/api/oauth/callback', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ platform, code }),
-      });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        await refreshUserData();
-      }
-    } catch (error) {
-      console.error('OAuth callback error:', error);
-    }
-  };
-
-  // Helper function to check if a platform is connected
-  const isPlatformConnected = (platform: string) => {
-    return user?.socialAccounts?.some(account => account.platform === platform) || false;
-  };
-
-  // Helper function to get platform account info
-  const getPlatformAccount = (platform: string) => {
-    return user?.socialAccounts?.find(account => account.platform === platform);
-  };
-    
-  // Add these helper functions to the context value
   const contextValue = {
     user,
     isAuthenticated: !!user,
@@ -335,9 +316,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     connectPlatform,
     disconnectPlatform,
     refreshUserData,
-    isPlatformConnected,
-    getPlatformAccount,
-    handleOAuthCallback,
   };
 
   return (
