@@ -258,9 +258,9 @@ const Dashboard = () => {
                               @{connectedAccount.username}
                             </p>
                           )}
-                          {connectedAccount.followerCount && (
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                              {connectedAccount.followerCount.toLocaleString()} followers
+                          {connectedAccount.follower_count && (
+                            <p className="text-xs text-gray-600 dark:text-gray-300">
+                              {connectedAccount.follower_count.toLocaleString()} followers
                             </p>
                           )}
                         </div>

@@ -19,8 +19,12 @@ const Login = () => {
     setError('');
     
     try {
-      await login(email, password);
-      navigate(from, { replace: true });
+      const result = await login(email, password);
+      if (result.error) {
+        setError(result.error);
+      } else {
+        navigate(from, { replace: true });
+      }
     } catch (err) {
       setError('Failed to login. Please check your credentials.');
     }
